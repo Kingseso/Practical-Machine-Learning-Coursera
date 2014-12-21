@@ -1,0 +1,110 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Cecil Rivers"
+date: "Monday, December 15, 2014"
+output: html_document
+---
+
+
+***Objective***
+
+This document outlines the course project analysis for the Coursera Practical Machine Learning course hosted by John Hopkins Bloomberg School of Public Health.  This project analyzes data from 6 participants who wore accelerometers on their belt, forearm, arm and dumbbell while they performed barbell lifts correctly and incorrectly in 5 different ways.  A detailed description of the measurement study can be found at http://groupware.les.inf.puc-rio.br/har .  
+
+The correct and incorrect data is stored in classes labeled A, B, C, D and E.  The model generated from the training data should be able to identify one of these classes when a new observation is applied to it.
+
+***Tidy Data***
+
+The first step in the analysis is downloading the training data (pml-training.csv) and test data (pml-testing.csv) and performing an exploratory look at the data.  The training dataset has 160 variables where the majority of the variables are accelerator data.  
+
+```{r, echo=FALSE,message=FALSE}
+library(caret)
+library(randomForest)
+#read training and test datasets
+pml_training <- read.csv("pml-training.csv",header=TRUE)   #store training dataset
+pml_testing <- read.csv("pml-testing.csv",header=TRUE)   #store testing dataset
+```
+
+```{r}
+dim(pml_training)
+```
+
+Before generating a model of the dataset, there are several variables that can be removed in order to make a tidy dataset.  Since the goal is to predict the class from future data, the user_name is removed since the future users may or may not be the previous users in the training set.  The raw_timestamp_part_1, raw_timestamp_part_2 and cvtd_timestamp were removed because the time the patient performs the movement should be independent from the movement captured.  
+
+The last set of variables that should be removed are the variables with missing or blank values.  The resulting tidy data set had 55 variables versus the original 160 variables.
+
+```{r,echo=FALSE}
+#Make tidy data
+pml_training$X <- NULL          #remove row number
+pml_testing$X <- NULL
+pml_training$user_name <- NULL  #remove user name
+pml_testing$user_name <- NULL
+pml_training$raw_timestamp_part_1 <- NULL
+pml_testing$raw_timestamp_part_1 <- NULL
+pml_training$raw_timestamp_part_2 <- NULL
+pml_testing$raw_timestamp_part_2 <- NULL
+pml_training$cvtd_timestamp <- NULL
+pml_testing$cvtd_timestamp <- NULL
+
+#Remove columns that have at least one NA
+tidy_training <- pml_training[ , colSums(is.na(pml_training)) == 0]
+tidy_testing <- pml_testing[ , colSums(is.na(pml_testing)) == 0]
+
+#Remove columns that have at least one blank
+tidy_training <- tidy_training[, colSums(tidy_training != "") == length(tidy_training[,1])]
+tidy_testing <- tidy_testing[, colSums(tidy_testing != "") == length(tidy_testing[,1])]
+```
+
+```{r}
+dim(tidy_training)
+```
+
+***Cross Validation***
+
+A leave-p-out cross validation was implemented where 75% of the tidy dataset from the pml-training.csv file was used to train the model and 25% of the dataset was used for validating the model.  
+
+```{r,echo=FALSE}
+set.seed(100)
+intrain = createDataPartition(tidy_training$classe, p = 0.75,list=FALSE)   #partition 75% of training data for training
+training = tidy_training[intrain,]
+testing = tidy_training[-intrain,]
+```
+
+
+***Basic Decision Tree***
+
+Since the goal is to determine which class a patient's measured movement falls into, an initial model of a decision tree using rpart (Recursive Partitioning and Regression Trees) was evaluated.  The Confusion Matrix shows a high level of miss-classifications when the test dataset is applied to the model.  The out of sample error of the model is 48.53% when the seed is set to 100.  
+
+```{r,echo=FALSE}
+#Generate Basic Prediction Tree
+set.seed(100)
+modFit <- train(classe ~.,method="rpart",data=training)
+
+#Generate Confusion Matrix
+pred <- predict(modFit,testing)
+confusion_matrix <- table(pred,testing$classe)
+confusionMatrix(confusion_matrix)
+```
+
+***Random Forest Model***
+
+Since the accuracy of the rpart model is so low, a random forest model was selected due its ability to provide higher accuracy for classification.
+
+```{r,echo=FALSE}
+#Random forests tree
+set.seed(100)
+modFit <- randomForest(classe ~.,data=training,importance=TRUE)
+#Generate Confusion Matrix
+pred <- predict(modFit,testing)
+confusion_matrix <- table(pred,testing$classe)
+confusionMatrix(confusion_matrix)
+```
+
+The out of sample error for the random forest model is 0.16% with a seed of 100.  This model was used to successfully predict the classes for each observation in the pml-testing.csv file based on course project submission system.
+
+```{r,echo=FALSE}
+#Add "yes" level to unknown test dataset, so R does not generator predictor error
+levels(tidy_testing$new_window) <- c("no","yes")
+
+prediction <- predict(modFit,tidy_testing)  #Classify each data observation in test dataset
+print(prediction)
+```
